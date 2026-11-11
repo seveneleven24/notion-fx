@@ -9,14 +9,23 @@ H = {
     "Content-Type": "application/json",
 }
 
-pages = requests.post(
-    f"https://api.notion.com/v1/databases/{DB_ID}/query", headers=H
-).json()["results"]
+r = requests.post(f"https://api.notion.com/v1/databases/{DB_ID}/query", headers=H)
+if not r.ok:
+    raise SystemExit(f"讀取資料庫失敗：{r.status_code} {r.text}")
 
-for p in pages:
-    cur = p["properties"]["幣別"]["title"][0]["plain_text"].strip()
-    rate = requests.get(f"https://open.er-api.com/v6/latest/{cur}").json()["rates"]["TWD"]
-    requests.patch(
+for p in r.json()["results"]:
+    title = p["properties"]["幣別"]["title"]
+    if not title:
+        continue
+    cur = title[0]["plain_text"].strip().upper()
+
+    resp = requests.get(f"https://open.er-api.com/v6/latest/{cur}")
+    rate = resp.json().get("rates", {}).get("TWD")
+    if rate is None:
+        print(f"{cur}：抓不到匯率，略過")
+        continue
+
+    u = requests.patch(
         f"https://api.notion.com/v1/pages/{p['id']}",
         headers=H,
         json={"properties": {
@@ -24,3 +33,6 @@ for p in pages:
             "更新日期": {"date": {"start": datetime.now(timezone.utc).isoformat()}},
         }},
     )
+    if not u.ok:
+        raise SystemExit(f"{cur} 寫入失敗：{u.status_code} {u.text}")
+    print(f"{cur} → {rate}")
